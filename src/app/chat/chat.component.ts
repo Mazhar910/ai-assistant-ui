@@ -3,10 +3,10 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 
-import { AgentService } from '../services/agent.service';
+import { AgentService, JobStreamHandle } from '../services/agent.service';
 import { AuthService } from '../services/auth.service';
 import { ThemeService } from '../services/theme.service';
-import { ChatSession, ChatSessionRecord } from '../models/chat';
+import { ChatJobStatus, ChatSession, ChatSessionRecord } from '../models/chat';
 import { SidebarComponent } from '../sidebar/sidebar.component';
 import { MarkdownComponent } from '../markdown/markdown.component';
 
@@ -45,6 +45,11 @@ export class ChatComponent implements OnInit, OnDestroy {
   private readonly activeKey = 'aiAgentActiveSession';
   private destroyed = false;
 
+  // Active job-status tracking so it can be torn down (no leaks) on destroy/session switch.
+  private stream: JobStreamHandle | null = null;
+  private pollTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingPoll: { jobId: string; sessionId: string; attempt: number } | null = null;
+
   constructor(
     private agentService: AgentService,
     public authService: AuthService,
@@ -71,12 +76,38 @@ export class ChatComponent implements OnInit, OnDestroy {
       next: () => this.loadSessions(),
       error: () => this.loadSessions()
     });
+    document.addEventListener('visibilitychange', this.onVisibilityChange);
   }
 
   ngOnDestroy(): void {
-    // Stop in-flight async churn (job polling, copy-ack timers) when the component is torn down.
+    // Stop in-flight async churn (job polling/streaming, copy-ack timers) when the
+    // component is torn down, so no open connection or timer can leak.
+    this.stopTracking();
+    document.removeEventListener('visibilitychange', this.onVisibilityChange);
     this.destroyed = true;
   }
+
+  /** Pauses polling while the tab is hidden and resumes (without burning attempts) when it returns. */
+  private onVisibilityChange = (): void => {
+    if (this.destroyed) {
+      return;
+    }
+    if (document.hidden) {
+      if (this.pollTimer !== null) {
+        clearTimeout(this.pollTimer);
+        this.pollTimer = null;
+      }
+    } else if (this.pendingPoll && this.pollTimer === null) {
+      const p = this.pendingPoll;
+      this.pendingPoll = null;
+      this.pollTimer = setTimeout(() => {
+        this.pollTimer = null;
+        if (!this.destroyed) {
+          this.pollJob(p.jobId, p.sessionId, p.attempt);
+        }
+      }, 0);
+    }
+  };
 
   /** Load AI-generated welcome suggestions (rotating fresh set on each reload). */
   private loadSuggestions(): void {
@@ -237,7 +268,7 @@ export class ChatComponent implements OnInit, OnDestroy {
       this.registerSession(sessionId, text);
       this.agentService.sendMessageAsync(text, sessionId).subscribe({
         next: (job) => {
-          this.pollJob(job.jobId, sessionId);
+          this.watchJob(job.jobId, sessionId);
         },
         error: (err) => {
           this.loading = false;
@@ -264,37 +295,89 @@ export class ChatComponent implements OnInit, OnDestroy {
     }
   }
 
-  private pollJob(jobId: string, sessionId: string, attempts = 0): void {
-    const MAX_ATTEMPTS = 200; // ~300s at 1.5s cadence
-    if (attempts >= MAX_ATTEMPTS) {
+  /**
+   * Tracks a job's status to completion, preferring Server-Sent Events (low latency,
+   * no polling load) and falling back to adaptive polling if the stream cannot be
+   * established or is dropped before a terminal state. Polling pauses while the tab
+   * is hidden, and everything is released on teardown ({@link stopTracking}).
+   */
+  private watchJob(jobId: string, sessionId: string): void {
+    this.stopTracking();
+    try {
+      const handle = this.agentService.streamJobStatus(jobId);
+      this.stream = handle;
+      handle.stream$.subscribe({
+        next: (status) => {
+          if (this.onJobStatus(status, sessionId)) {
+            this.stopTracking();
+          }
+        },
+        error: () => this.fallbackToPolling(jobId, sessionId),
+        complete: () => {
+          // Stream closed without a terminal event (e.g. a dropped connection while
+          // the job is still running) -> fall back to polling to catch completion.
+          this.stream = null;
+          if (this.loading && !this.destroyed) {
+            this.pollJob(jobId, sessionId, 0);
+          }
+        }
+      });
+    } catch {
+      this.fallbackToPolling(jobId, sessionId);
+    }
+  }
+
+  private fallbackToPolling(jobId: string, sessionId: string): void {
+    if (this.stream) {
+      this.stream.abort();
+      this.stream = null;
+    }
+    if (!this.destroyed) {
+      this.pollJob(jobId, sessionId, 0);
+    }
+  }
+
+  /**
+   * Adaptive polling fallback: grows the interval (up to a cap) so a dropped SSE
+   * stream still gets to the terminal state without hammering the server, and pauses
+   * entirely while the tab is hidden.
+   */
+  private pollJob(jobId: string, sessionId: string, attempt: number): void {
+    const MAX_POLLS = 300;
+    if (attempt >= MAX_POLLS || this.destroyed) {
+      this.pendingPoll = null;
       this.loading = false;
       this.error = 'The request is taking too long. Please try again.';
       this.scrollToBottom();
       return;
     }
+    if (document.hidden) {
+      // Pause; the visibilitychange handler resumes this without losing the attempt.
+      this.pendingPoll = { jobId, sessionId, attempt };
+      return;
+    }
     this.agentService.getJobStatus(jobId).subscribe({
       next: (status) => {
-        if (status.state === 'COMPLETED') {
-          // Update the shared session list/cache regardless of which conversation is
-          // currently being viewed, but only mutate the visible message list when this
-          // job's session is still the active one (avoids appending to the wrong chat).
-          this.registerSession(sessionId, status.reply ?? '');
-          if (this.activeSessionId === sessionId) {
-            this.messages.push({ role: 'assistant', content: status.reply ?? '' });
-            this.loading = false;
-            this.scrollToBottom();
-          }
-        } else if (status.state === 'FAILED') {
-          if (this.activeSessionId === sessionId) {
-            this.loading = false;
-            this.error = status.error ?? 'The request failed. Please try again.';
-            this.scrollToBottom();
-          }
-        } else if (!this.destroyed) {
-          setTimeout(() => this.pollJob(jobId, sessionId, attempts + 1), 1500);
+        if (this.onJobStatus(status, sessionId)) {
+          this.pendingPoll = null;
+          return;
         }
+        if (this.destroyed) {
+          return;
+        }
+        const delay = Math.min(5000, 1000 * Math.pow(1.5, attempt));
+        this.pendingPoll = { jobId, sessionId, attempt: attempt + 1 };
+        this.pollTimer = setTimeout(() => {
+          const p = this.pendingPoll;
+          this.pendingPoll = null;
+          this.pollTimer = null;
+          if (p && !this.destroyed) {
+            this.pollJob(p.jobId, p.sessionId, p.attempt);
+          }
+        }, delay);
       },
       error: (err) => {
+        this.pendingPoll = null;
         if (this.activeSessionId === sessionId) {
           this.loading = false;
           this.error = this.extractError(err);
@@ -302,6 +385,46 @@ export class ChatComponent implements OnInit, OnDestroy {
         }
       }
     });
+  }
+
+  /**
+   * Applies a job status event to the UI. Always registers the completed session in
+   * the shared list, but only mutates the visible message list when the job's session
+   * is still the active one (avoids appending to the wrong chat). Returns true when the
+   * job reached a terminal state.
+   */
+  private onJobStatus(status: ChatJobStatus, sessionId: string): boolean {
+    if (status.state === 'COMPLETED') {
+      this.registerSession(sessionId, status.reply ?? '');
+      if (this.activeSessionId === sessionId) {
+        this.messages.push({ role: 'assistant', content: status.reply ?? '' });
+      }
+      this.loading = false;
+      this.scrollToBottom();
+      return true;
+    }
+    if (status.state === 'FAILED') {
+      if (this.activeSessionId === sessionId) {
+        this.error = status.error ?? 'The request failed. Please try again.';
+      }
+      this.loading = false;
+      this.scrollToBottom();
+      return true;
+    }
+    return false;
+  }
+
+  /** Aborts any open stream and clears any pending poll timer (leak prevention). */
+  private stopTracking(): void {
+    if (this.stream) {
+      this.stream.abort();
+      this.stream = null;
+    }
+    if (this.pollTimer !== null) {
+      clearTimeout(this.pollTimer);
+      this.pollTimer = null;
+    }
+    this.pendingPoll = null;
   }
 
   onComposerKeydown(event: KeyboardEvent): void {
