@@ -45,10 +45,14 @@ export class ChatComponent implements OnInit, OnDestroy {
   private readonly activeKey = 'aiAgentActiveSession';
   private destroyed = false;
 
-  // Active job-status tracking so it can be torn down (no leaks) on destroy/session switch.
+  // Active job-status tracking so it can be torn down (no leaks) on destroy/session
+  // switch. The epoch guards against stale callbacks from an abandoned job (e.g. the
+  // user clicked New Chat while a job was streaming): only the latest epoch may mutate
+  // state or schedule polling.
   private stream: JobStreamHandle | null = null;
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
-  private pendingPoll: { jobId: string; sessionId: string; attempt: number } | null = null;
+  private pendingPoll: { jobId: string; sessionId: string; attempt: number; epoch: number } | null = null;
+  private trackEpoch = 0;
 
   constructor(
     private agentService: AgentService,
@@ -103,7 +107,7 @@ export class ChatComponent implements OnInit, OnDestroy {
       this.pollTimer = setTimeout(() => {
         this.pollTimer = null;
         if (!this.destroyed) {
-          this.pollJob(p.jobId, p.sessionId, p.attempt);
+          this.pollJob(p.jobId, p.sessionId, p.attempt, p.epoch);
         }
       }, 0);
     }
@@ -167,6 +171,15 @@ export class ChatComponent implements OnInit, OnDestroy {
   }
 
   newChat(): void {
+    // Do NOT abort an in-flight job for the previous conversation. Keep its stream
+    // open in the background so the answer still arrives and populates that
+    // conversation (sidebar / history on reopen), even though this fresh view won't
+    // show it. Only release the composer so the new chat is immediately usable; the
+    // epoch guard drops any stale callbacks and the next send/watchJob tears down
+    // leftover tracking. If the user never sends again, the background stream simply
+    // runs until the job completes (or the server-side SSE timeout fires) and then
+    // releases itself via stopTracking().
+    this.loading = false;
     this.activeSessionId = null;
     localStorage.removeItem(this.activeKey);
     this.messages = this.welcome();
@@ -303,26 +316,48 @@ export class ChatComponent implements OnInit, OnDestroy {
    */
   private watchJob(jobId: string, sessionId: string): void {
     this.stopTracking();
+    const epoch = this.trackEpoch;
     try {
       const handle = this.agentService.streamJobStatus(jobId);
+      // The user may have clicked New Chat / switched while the stream was opening.
+      if (epoch !== this.trackEpoch) {
+        handle.abort();
+        return;
+      }
       this.stream = handle;
       handle.stream$.subscribe({
         next: (status) => {
+          if (epoch !== this.trackEpoch) {
+            return; // abandoned while waiting
+          }
           if (this.onJobStatus(status, sessionId)) {
             this.stopTracking();
           }
         },
-        error: () => this.fallbackToPolling(jobId, sessionId),
+        error: () => {
+          if (epoch !== this.trackEpoch) {
+            return;
+          }
+          this.fallbackToPolling(jobId, sessionId);
+        },
         complete: () => {
-          // Stream closed without a terminal event (e.g. a dropped connection while
-          // the job is still running) -> fall back to polling to catch completion.
+          // Stream closed without a terminal event (e.g. dropped connection while the
+          // job is still running) -> fall back to polling to catch its completion.
+          // The epoch guard (rather than the previous `!this.destroyed` check) is what
+          // keeps an abandoned job from scheduling polling after teardown/New Chat.
+          if (epoch !== this.trackEpoch) {
+            return;
+          }
           this.stream = null;
-          if (this.loading && !this.destroyed) {
-            this.pollJob(jobId, sessionId, 0);
+          if (this.loading) {
+            this.pollJob(jobId, sessionId, 0, epoch);
           }
         }
       });
     } catch {
+      if (epoch !== this.trackEpoch) {
+        return;
+      }
       this.fallbackToPolling(jobId, sessionId);
     }
   }
@@ -333,17 +368,21 @@ export class ChatComponent implements OnInit, OnDestroy {
       this.stream = null;
     }
     if (!this.destroyed) {
-      this.pollJob(jobId, sessionId, 0);
+      this.pollJob(jobId, sessionId, 0, this.trackEpoch);
     }
   }
 
   /**
    * Adaptive polling fallback: grows the interval (up to a cap) so a dropped SSE
    * stream still gets to the terminal state without hammering the server, and pauses
-   * entirely while the tab is hidden.
+   * entirely while the tab is hidden. The `epoch` pins this loop to the job it belongs
+   * to so a stale response cannot resurrect polling for an abandoned job.
    */
-  private pollJob(jobId: string, sessionId: string, attempt: number): void {
+  private pollJob(jobId: string, sessionId: string, attempt: number, epoch: number): void {
     const MAX_POLLS = 300;
+    if (epoch !== this.trackEpoch) {
+      return; // abandoned while waiting
+    }
     if (attempt >= MAX_POLLS || this.destroyed) {
       this.pendingPoll = null;
       this.loading = false;
@@ -353,11 +392,14 @@ export class ChatComponent implements OnInit, OnDestroy {
     }
     if (document.hidden) {
       // Pause; the visibilitychange handler resumes this without losing the attempt.
-      this.pendingPoll = { jobId, sessionId, attempt };
+      this.pendingPoll = { jobId, sessionId, attempt, epoch };
       return;
     }
     this.agentService.getJobStatus(jobId).subscribe({
       next: (status) => {
+        if (epoch !== this.trackEpoch) {
+          return;
+        }
         if (this.onJobStatus(status, sessionId)) {
           this.pendingPoll = null;
           return;
@@ -366,17 +408,20 @@ export class ChatComponent implements OnInit, OnDestroy {
           return;
         }
         const delay = Math.min(5000, 1000 * Math.pow(1.5, attempt));
-        this.pendingPoll = { jobId, sessionId, attempt: attempt + 1 };
+        this.pendingPoll = { jobId, sessionId, attempt: attempt + 1, epoch };
         this.pollTimer = setTimeout(() => {
           const p = this.pendingPoll;
           this.pendingPoll = null;
           this.pollTimer = null;
           if (p && !this.destroyed) {
-            this.pollJob(p.jobId, p.sessionId, p.attempt);
+            this.pollJob(p.jobId, p.sessionId, p.attempt, p.epoch);
           }
         }, delay);
       },
       error: (err) => {
+        if (epoch !== this.trackEpoch) {
+          return;
+        }
         this.pendingPoll = null;
         if (this.activeSessionId === sessionId) {
           this.loading = false;
@@ -414,8 +459,11 @@ export class ChatComponent implements OnInit, OnDestroy {
     return false;
   }
 
-  /** Aborts any open stream and clears any pending poll timer (leak prevention). */
+  /** Aborts any open stream, clears any pending poll timer, and invalidates tracking. */
   private stopTracking(): void {
+    // Invalidate any in-flight callbacks/timers for the previous job so an abandoned
+    // stream cannot resurrect polling or mutate the UI.
+    this.trackEpoch++;
     if (this.stream) {
       this.stream.abort();
       this.stream = null;
