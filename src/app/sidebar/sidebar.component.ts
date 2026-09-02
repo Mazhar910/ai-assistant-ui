@@ -1,7 +1,7 @@
 import { Component, EventEmitter, Input, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
-import { ChatSession } from '../models/chat';
+import { ChatSessionRecord } from '../models/chat';
 
 @Component({
   selector: 'app-sidebar',
@@ -12,7 +12,7 @@ import { ChatSession } from '../models/chat';
 })
 export class SidebarComponent {
 
-  @Input() sessions: ChatSession[] = [];
+  @Input() sessions: ChatSessionRecord[] = [];
   @Input() activeSessionId: string | null = null;
   @Input() isAdmin = false;
   @Input() userName = '';

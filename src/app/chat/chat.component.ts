@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -6,7 +6,7 @@ import { Router } from '@angular/router';
 import { AgentService } from '../services/agent.service';
 import { AuthService } from '../services/auth.service';
 import { ThemeService } from '../services/theme.service';
-import { ChatSession } from '../models/chat';
+import { ChatSession, ChatSessionRecord } from '../models/chat';
 import { SidebarComponent } from '../sidebar/sidebar.component';
 import { MarkdownComponent } from '../markdown/markdown.component';
 
@@ -22,10 +22,10 @@ interface UiMessage {
   templateUrl: './chat.component.html',
   styleUrls: ['./chat.component.css']
 })
-export class ChatComponent implements OnInit {
+export class ChatComponent implements OnInit, OnDestroy {
 
   messages: UiMessage[] = [];
-  sessions: ChatSession[] = [];
+  sessions: ChatSessionRecord[] = [];
   activeSessionId: string | null = null;
   input = '';
   loading = false;
@@ -43,6 +43,7 @@ export class ChatComponent implements OnInit {
 
   private readonly sessionsKey = 'aiAgentSessions';
   private readonly activeKey = 'aiAgentActiveSession';
+  private destroyed = false;
 
   constructor(
     private agentService: AgentService,
@@ -72,6 +73,11 @@ export class ChatComponent implements OnInit {
     });
   }
 
+  ngOnDestroy(): void {
+    // Stop in-flight async churn (job polling, copy-ack timers) when the component is torn down.
+    this.destroyed = true;
+  }
+
   /** Load AI-generated welcome suggestions (rotating fresh set on each reload). */
   private loadSuggestions(): void {
     this.agentService.getSuggestions().subscribe({
@@ -89,7 +95,7 @@ export class ChatComponent implements OnInit {
   private loadSessions(): void {
     this.historyLoading = true;
     this.agentService.getSessions().subscribe({
-      next: (serverSessions: any[]) => {
+      next: (serverSessions: ChatSession[]) => {
         this.sessions = this.mergeSessions(serverSessions || []);
         this.persistSessions();
         this.restoreActive();
@@ -103,8 +109,8 @@ export class ChatComponent implements OnInit {
   }
 
   /** Merge server sessions (authoritative) with the localStorage cache and sort by recency. */
-  private mergeSessions(server: any[]): ChatSession[] {
-    const byId = new Map<string, ChatSession>();
+  private mergeSessions(server: ChatSession[]): ChatSessionRecord[] {
+    const byId = new Map<string, ChatSessionRecord>();
     for (const c of this.readSessions()) {
       byId.set(c.conversationId, c);
     }
@@ -155,6 +161,11 @@ export class ChatComponent implements OnInit {
 
     this.agentService.getHistory(sessionId).subscribe({
       next: (history) => {
+        // Ignore a late response if the user switched to another session in the meantime,
+        // otherwise the stale history would overwrite the newly-opened conversation.
+        if (this.activeSessionId !== sessionId) {
+          return;
+        }
         this.messages = history.map((m) => ({
           role: m.role === 'user' ? 'user' : 'assistant',
           content: m.content
@@ -188,7 +199,11 @@ export class ChatComponent implements OnInit {
   copyMessage(content: string, index: number): void {
     this.copyText(content);
     this.copiedIndex = index;
-    setTimeout(() => (this.copiedIndex = null), 1600);
+    setTimeout(() => {
+      if (!this.destroyed) {
+        this.copiedIndex = null;
+      }
+    }, 1600);
   }
 
   get showWelcome(): boolean {
@@ -260,22 +275,31 @@ export class ChatComponent implements OnInit {
     this.agentService.getJobStatus(jobId).subscribe({
       next: (status) => {
         if (status.state === 'COMPLETED') {
+          // Update the shared session list/cache regardless of which conversation is
+          // currently being viewed, but only mutate the visible message list when this
+          // job's session is still the active one (avoids appending to the wrong chat).
           this.registerSession(sessionId, status.reply ?? '');
-          this.messages.push({ role: 'assistant', content: status.reply ?? '' });
-          this.loading = false;
-          this.scrollToBottom();
+          if (this.activeSessionId === sessionId) {
+            this.messages.push({ role: 'assistant', content: status.reply ?? '' });
+            this.loading = false;
+            this.scrollToBottom();
+          }
         } else if (status.state === 'FAILED') {
-          this.loading = false;
-          this.error = status.error ?? 'The request failed. Please try again.';
-          this.scrollToBottom();
-        } else {
+          if (this.activeSessionId === sessionId) {
+            this.loading = false;
+            this.error = status.error ?? 'The request failed. Please try again.';
+            this.scrollToBottom();
+          }
+        } else if (!this.destroyed) {
           setTimeout(() => this.pollJob(jobId, sessionId, attempts + 1), 1500);
         }
       },
       error: (err) => {
-        this.loading = false;
-        this.error = this.extractError(err);
-        this.scrollToBottom();
+        if (this.activeSessionId === sessionId) {
+          this.loading = false;
+          this.error = this.extractError(err);
+          this.scrollToBottom();
+        }
       }
     });
   }
@@ -325,11 +349,11 @@ export class ChatComponent implements OnInit {
     return clean.length > 40 ? clean.slice(0, 40) + '...' : clean;
   }
 
-  private readSessions(): ChatSession[] {
+  private readSessions(): ChatSessionRecord[] {
     try {
       const raw = localStorage.getItem(this.sessionsKey);
       const arr = raw ? JSON.parse(raw) : [];
-      const sessions: ChatSession[] = Array.isArray(arr) ? arr : [];
+      const sessions: ChatSessionRecord[] = Array.isArray(arr) ? arr : [];
       return sessions.sort((a, b) => b.updatedAt - a.updatedAt);
     } catch (err) {
       console.error('Could not read sessions from storage', err);

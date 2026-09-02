@@ -20,10 +20,11 @@ describe('AppComponent', () => {
     expect(app.title).toEqual('ai-agent-ui');
   });
 
-  it('should render title', () => {
+  it('should render the app shell', () => {
     const fixture = TestBed.createComponent(AppComponent);
     fixture.detectChanges();
     const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('h1')?.textContent).toContain('Hello, ai-agent-ui');
+    expect(compiled.querySelector('.app-shell')).toBeTruthy();
+    expect(compiled.querySelector('router-outlet')).toBeTruthy();
   });
 });

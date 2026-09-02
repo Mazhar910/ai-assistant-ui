@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { ChatMessage, ChatResponse, User, AdminStats, ChatJobStatus } from '../models/chat';
+import { ChatMessage, User, AdminStats, ChatJobStatus, ChatSession } from '../models/chat';
 import { environment } from '../../environments/environment';
 
 @Injectable({
@@ -13,10 +13,6 @@ export class AgentService {
   private readonly adminUrl = `${environment.apiBaseUrl}/admin`;
 
   constructor(private http: HttpClient) { }
-
-  sendMessage(message: string, conversationId?: string): Observable<ChatResponse> {
-    return this.http.post<ChatResponse>(`${this.baseUrl}/chat`, { message, conversationId });
-  }
 
   /** Submits a chat turn to the async job queue; returns immediately with a jobId. */
   sendMessageAsync(message: string, conversationId?: string): Observable<ChatJobStatus> {
@@ -40,8 +36,8 @@ export class AgentService {
     return this.http.delete<{ cleared: boolean }>(`${this.baseUrl}/conversation/${conversationId}`);
   }
 
-  getSessions(): Observable<any[]> {
-    return this.http.get<any[]>(`${this.baseUrl}/sessions`);
+  getSessions(): Observable<ChatSession[]> {
+    return this.http.get<ChatSession[]>(`${this.baseUrl}/sessions`);
   }
 
   getSuggestions(): Observable<string[]> {

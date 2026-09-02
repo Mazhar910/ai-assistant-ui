@@ -12,10 +12,19 @@ export interface ChatResponse {
   conversationId: string;
   reply: string;
   timestamp: string;
-  history?: ChatMessage[];
+  /** Model that produced this reply, when one was selected via the fallback chain. */
+  model?: string;
 }
 
+/** Server session listing (updatedAt serialized as an ISO-8601 string). */
 export interface ChatSession {
+  conversationId: string;
+  title: string;
+  updatedAt: string;
+}
+
+/** UI-side session record: updatedAt normalized to epoch millis for sorting/merging. */
+export interface ChatSessionRecord {
   conversationId: string;
   title: string;
   updatedAt: number;
