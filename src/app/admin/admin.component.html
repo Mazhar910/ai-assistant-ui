@@ -1,0 +1,166 @@
+<div class="admin-layout">
+  <aside class="admin-sidebar">
+    <div class="sidebar-header">
+      <div class="admin-logo"></div>
+      <span class="admin-label">Admin Panel</span>
+    </div>
+
+    <nav class="sidebar-nav">
+      <a class="nav-item" [class.active]="activeTab === 'overview'" (click)="switchTab('overview')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Overview
+      </a>
+      <a class="nav-item" [class.active]="activeTab === 'users'" (click)="switchTab('users')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        Users
+      </a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <a class="nav-item" routerLink="/chat">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        Back to Chat
+      </a>
+      <button class="nav-item theme-btn" (click)="themeService.toggle()">
+        <svg *ngIf="!themeService.isDark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg *ngIf="themeService.isDark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        {{ themeService.isDark ? 'Light Mode' : 'Dark Mode' }}
+      </button>
+      <button class="nav-item logout-btn" (click)="logout()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+        Sign Out
+      </button>
+    </div>
+  </aside>
+
+  <main class="admin-main">
+    <div *ngIf="error" class="error-banner">{{ error }}</div>
+
+    <!-- Overview Tab -->
+    <div *ngIf="activeTab === 'overview' && stats" class="content">
+      <h2 class="page-title">Dashboard Overview</h2>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-icon users-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+          </div>
+          <div class="stat-info">
+            <div class="stat-value">{{ stats.totalUsers }}</div>
+            <div class="stat-label">Total Users</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon active-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          </div>
+          <div class="stat-info">
+            <div class="stat-value">{{ stats.activeUsers }}</div>
+            <div class="stat-label">Active Users</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon tokens-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          </div>
+          <div class="stat-info">
+            <div class="stat-value">{{ formatTokens(stats.totalTokens) }}</div>
+            <div class="stat-label">Total Tokens</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon conv-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          </div>
+          <div class="stat-info">
+            <div class="stat-value">{{ stats.totalConversations }}</div>
+            <div class="stat-label">Conversations</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="charts-row">
+        <div class="chart-card">
+          <h3>Token Usage by Model</h3>
+          <div class="model-list" *ngIf="stats.tokensByModel.length > 0">
+            <div class="model-row" *ngFor="let m of stats.tokensByModel">
+              <span class="model-name">{{ m.model || 'unknown' }}</span>
+              <div class="model-bar-wrap">
+                <div class="model-bar" [style.width.%]="getBarWidth(m.tokens)"></div>
+              </div>
+              <span class="model-tokens">{{ formatTokens(m.tokens) }}</span>
+            </div>
+          </div>
+          <div class="empty-state" *ngIf="stats.tokensByModel.length === 0">No token data yet</div>
+        </div>
+
+        <div class="chart-card">
+          <h3>Daily Token Usage (30 days)</h3>
+          <div class="chart-bars" *ngIf="stats.dailyUsage.length > 0">
+            <div class="day-col" *ngFor="let d of stats.dailyUsage">
+              <div class="day-bar" [style.height.%]="getDayBarHeight(d.tokens)"></div>
+              <span class="day-label">{{ d.date }}</span>
+            </div>
+          </div>
+          <div class="empty-state" *ngIf="stats.dailyUsage.length === 0">No daily data yet</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Users Tab -->
+    <div *ngIf="activeTab === 'users'" class="content">
+      <h2 class="page-title">User Management</h2>
+
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Email</th>
+              <th>Role</th>
+              <th>Status</th>
+              <th>Tokens</th>
+              <th>Conversations</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let user of users">
+              <td class="user-cell">
+                <div class="user-avatar">{{ user.username.charAt(0).toUpperCase() }}</div>
+                {{ user.username }}
+              </td>
+              <td>{{ user.email }}</td>
+              <td>
+                <span class="badge" [class.admin]="user.role === 'ADMIN'">{{ user.role }}</span>
+              </td>
+              <td>
+                <span class="status-dot" [class.active]="user.enabled"></span>
+                {{ user.enabled ? 'Active' : 'Disabled' }}
+              </td>
+              <td>{{ formatTokens(user.totalTokens) }}</td>
+              <td>{{ user.conversationCount }}</td>
+              <td class="actions">
+                <button class="action-btn" (click)="toggleAccess(user.id)" [disabled]="isSelf(user.id)" [title]="isSelf(user.id) ? 'You cannot disable your own account' : (user.enabled ? 'Revoke access' : 'Restore access')">
+                  <svg *ngIf="user.enabled" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18.36 6.64a9 9 0 1 1-12.73 0M12 2v10"/></svg>
+                  <svg *ngIf="!user.enabled" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                </button>
+                <button class="action-btn" (click)="changeRole(user.id, user.role === 'ADMIN' ? 'USER' : 'ADMIN')" [disabled]="isSelf(user.id)" [title]="isSelf(user.id) ? 'You cannot change your own role' : 'Toggle role'">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                </button>
+                <button class="action-btn danger" (click)="deleteUser(user.id, user.username)" [disabled]="isSelf(user.id)" [title]="isSelf(user.id) ? 'You cannot delete your own account' : 'Delete user'">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div *ngIf="loading" class="loading-state">
+      <div class="loader"></div>
+      <span>Loading...</span>
+    </div>
+  </main>
+</div>

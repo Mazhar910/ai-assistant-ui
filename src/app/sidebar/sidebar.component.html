@@ -1,0 +1,70 @@
+<aside class="sidebar">
+  <button class="new-chat-btn" (click)="newChat.emit()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <path d="M12 5v14M5 12h14"/>
+    </svg>
+    New chat
+  </button>
+
+  <div class="section-label">Recent conversations</div>
+
+  <div class="session-list">
+    <div
+      *ngFor="let session of sessions"
+      class="session-item"
+      [class.active]="session.conversationId === activeSessionId"
+      (click)="selectSession.emit(session.conversationId)"
+      title="{{ session.title }}">
+      <svg class="session-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+        stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+      </svg>
+      <span class="session-title">{{ session.title || 'New chat' }}</span>
+      <span class="session-delete" title="Delete conversation"
+        (click)="$event.stopPropagation(); deleteSession.emit(session.conversationId)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>
+        </svg>
+      </span>
+    </div>
+
+    <div *ngIf="sessions.length === 0" class="empty-hint">
+      No conversations yet. Start a new chat.
+    </div>
+  </div>
+
+  <div class="sidebar-footer">
+    <div class="status-row">
+      <span class="status-dot"></span>
+      <span class="status-text">opencode connected</span>
+    </div>
+
+    <div class="user-row">
+      <div class="user-avatar">{{ userInitials }}</div>
+      <span class="user-name">{{ userName }}</span>
+    </div>
+
+    <div class="footer-actions">
+      <button class="footer-btn" (click)="toggleTheme.emit()" title="Toggle theme">
+        <svg *ngIf="!isDark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+        <svg *ngIf="isDark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="5"/>
+          <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+        </svg>
+      </button>
+      <button *ngIf="isAdmin" class="footer-btn" (click)="goAdmin.emit()" title="Admin panel">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+      </button>
+      <button class="footer-btn" (click)="logout.emit()" title="Sign out">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+</aside>

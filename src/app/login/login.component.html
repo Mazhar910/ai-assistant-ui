@@ -1,0 +1,52 @@
+<div class="auth-page">
+  <button class="theme-toggle" (click)="themeService.toggle()" title="Toggle theme">
+    <svg *ngIf="!themeService.isDark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+    </svg>
+    <svg *ngIf="themeService.isDark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="5"/>
+      <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+    </svg>
+  </button>
+
+  <div class="auth-card">
+    <div class="auth-logo"></div>
+    <h1 class="auth-title">{{ mode === 'login' ? 'Welcome back' : 'Create account' }}</h1>
+    <p class="auth-sub">{{ mode === 'login' ? 'Sign in to continue to AI Agent' : 'Sign up to get started' }}</p>
+
+    <div *ngIf="error" class="alert alert-error">{{ error }}</div>
+    <div *ngIf="success" class="alert alert-success">{{ success }}</div>
+
+    <form (ngSubmit)="submit()" class="auth-form">
+      <div class="field">
+        <label>Username</label>
+        <input type="text" [(ngModel)]="username" name="username" placeholder="Enter username" autocomplete="username" />
+      </div>
+
+      <div class="field" *ngIf="mode === 'register'">
+        <label>Email</label>
+        <input type="email" [(ngModel)]="email" name="email" placeholder="Enter email" autocomplete="email" />
+      </div>
+
+      <div class="field">
+        <label>Password</label>
+        <input type="password" [(ngModel)]="password" name="password" placeholder="Enter password" autocomplete="current-password" />
+      </div>
+
+      <div class="field" *ngIf="mode === 'register'">
+        <label>Confirm Password</label>
+        <input type="password" [(ngModel)]="confirmPassword" name="confirmPassword" placeholder="Confirm password" />
+      </div>
+
+      <button class="auth-btn" type="submit" [disabled]="loading">
+        <span *ngIf="!loading">{{ mode === 'login' ? 'Sign in' : 'Create account' }}</span>
+        <span *ngIf="loading" class="spinner"></span>
+      </button>
+    </form>
+
+    <p class="auth-switch">
+      {{ mode === 'login' ? "Don't have an account?" : "Already have an account?" }}
+      <a (click)="toggleMode()">{{ mode === 'login' ? 'Sign up' : 'Sign in' }}</a>
+    </p>
+  </div>
+</div>

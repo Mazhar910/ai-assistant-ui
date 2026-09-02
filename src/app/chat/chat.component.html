@@ -1,0 +1,127 @@
+<div class="chat-layout">
+  <div class="sidebar-backdrop" *ngIf="sidebarOpen" (click)="closeSidebar()"></div>
+  <div class="sidebar-wrap" [class.open]="sidebarOpen">
+    <app-sidebar
+      [sessions]="sessions"
+      [activeSessionId]="activeSessionId"
+      [isAdmin]="authService.isAdmin"
+      [userName]="userName"
+      [isDark]="themeService.isDark"
+      (newChat)="newChat(); closeSidebar()"
+      (selectSession)="openSession($event); closeSidebar()"
+      (deleteSession)="deleteSession($event)"
+      (toggleTheme)="themeService.toggle()"
+      (logout)="logout()"
+      (goAdmin)="router.navigate(['/admin']); closeSidebar()">
+    </app-sidebar>
+  </div>
+
+  <main class="chat-main">
+    <header class="mobile-header">
+      <button class="menu-btn" (click)="toggleSidebar()" title="Menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M3 12h18M3 6h18M3 18h18"/>
+        </svg>
+      </button>
+      <span class="mobile-title">AI Agent</span>
+      <div class="mobile-spacer"></div>
+    </header>
+    <div id="messageArea" class="message-area">
+      <div *ngIf="historyLoading" class="center-status">Loading conversation...</div>
+
+      <div *ngIf="showWelcome" class="welcome">
+        <div class="welcome-mark"></div>
+        <h1 class="welcome-title">How can I help you, {{ userName }}?</h1>
+        <div class="welcome-chips">
+          <button class="chip" *ngFor="let suggestion of suggestions" (click)="useSuggestion(suggestion)">
+            <svg class="chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.4 1 2.3h6c0-.9.4-1.8 1-2.3A7 7 0 0 0 12 2z"/>
+            </svg>
+            <span>{{ suggestion }}</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="message-column" *ngIf="!showWelcome">
+        <div
+          *ngFor="let message of messages; let i = index"
+          class="message-row"
+          [ngClass]="message.role === 'user' ? 'user' : 'assistant'">
+
+          <div class="avatar avatar-ai" *ngIf="message.role === 'assistant'">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2l1.6 4.8L19 9l-5.4 2.2L12 16l-1.6-4.8L5 9l5.4-2.2L12 2z"/>
+              <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15z"/>
+            </svg>
+          </div>
+
+          <div class="msg-wrapper">
+            <button
+              *ngIf="message.role === 'assistant'"
+              class="icon-btn copy-reply"
+              [title]="copiedIndex === i ? 'Copied' : 'Copy response'"
+              (click)="copyMessage(message.content, i)">
+              <svg *ngIf="copiedIndex !== i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <rect width="13" height="13" x="9" y="9" rx="2"/>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+              </svg>
+              <svg *ngIf="copiedIndex === i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 6 9 17l-5-5"/>
+              </svg>
+            </button>
+
+            <div class="user-bubble" *ngIf="message.role === 'user'">{{ message.content }}</div>
+            <app-markdown *ngIf="message.role === 'assistant'" [content]="message.content"></app-markdown>
+          </div>
+
+          <div class="avatar avatar-user" *ngIf="message.role === 'user'">{{ userInitials }}</div>
+        </div>
+
+        <div *ngIf="loading" class="message-row assistant">
+          <div class="avatar avatar-ai">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2l1.6 4.8L19 9l-5.4 2.2L12 16l-1.6-4.8L5 9l5.4-2.2L12 2z"/>
+              <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15z"/>
+            </svg>
+          </div>
+          <div class="msg-wrapper">
+            <div class="typing"><span></span><span></span><span></span></div>
+          </div>
+        </div>
+
+        <div *ngIf="error" class="error-banner">{{ error }}</div>
+      </div>
+    </div>
+
+    <div class="composer">
+      <div class="composer-box">
+        <textarea
+          class="composer-input"
+          rows="1"
+          placeholder="Ask anything..."
+          [(ngModel)]="input"
+          (keydown)="onComposerKeydown($event)"
+          [disabled]="loading"
+          (input)="autoGrow($event)"></textarea>
+        <button
+          class="send-btn"
+          [class.active]="!!input.trim()"
+          (click)="send()"
+          [disabled]="loading || !input.trim()"
+          title="Send message">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 19V5"/>
+            <path d="M5 12l7-7 7 7"/>
+          </svg>
+        </button>
+      </div>
+      <div class="composer-hint">AI Agent can make mistakes. Verify important information.</div>
+    </div>
+  </main>
+</div>
