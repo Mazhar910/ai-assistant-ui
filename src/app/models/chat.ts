@@ -1,5 +1,5 @@
 export interface ChatMessage {
-  role: string;
+  role: 'user' | 'assistant';
   content: string;
 }
 
@@ -32,6 +32,7 @@ export interface ChatSessionRecord {
 
 export interface AuthResponse {
   token?: string;
+  refreshToken?: string;
   username?: string;
   role?: string;
   message?: string;

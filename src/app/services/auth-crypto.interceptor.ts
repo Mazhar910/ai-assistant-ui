@@ -3,18 +3,27 @@ import { inject } from '@angular/core';
 import { catchError, from, Observable, of, switchMap } from 'rxjs';
 
 import { CryptoService } from './crypto.service';
+import { environment } from '../../environments/environment';
 
 /**
  * Applies AES-GCM transport encryption to every request/response except the crypto
  * handshake endpoints. Request bodies and the auth token are encrypted and carried in
  * the X-Auth-Enc header; response bodies are encrypted envelopes. This keeps the data
  * hidden from DevTools Network inspection.
+ *
+ * When {@link environment.cryptoEnabled} is false the interceptor passes all traffic
+ * through unchanged (plaintext, secured by TLS/JWT) so the layer can be switched off.
  */
 export const authCryptoInterceptor: HttpInterceptorFn = (req, next) => {
   const cryptoService = inject(CryptoService);
 
   // Handshake + public-key endpoints stay plaintext.
   if (req.url.includes('/api/crypto/')) {
+    return next(req);
+  }
+
+  // Feature flag off -> no application-layer encryption.
+  if (!environment.cryptoEnabled) {
     return next(req);
   }
 

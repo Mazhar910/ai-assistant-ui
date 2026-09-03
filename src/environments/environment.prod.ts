@@ -2,5 +2,6 @@
 // so all requests stay same-origin (no CORS, works over the tunnel's HTTPS).
 export const environment = {
   production: true,
-  apiBaseUrl: '/api'
+  apiBaseUrl: '/api',
+  cryptoEnabled: true
 };

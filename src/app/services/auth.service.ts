@@ -17,6 +17,7 @@ export class AuthService {
 
   private readonly baseUrl = `${environment.apiBaseUrl}/auth`;
   private readonly tokenKey = 'aiAgentToken';
+  private readonly refreshTokenKey = 'aiAgentRefreshToken';
   private readonly userKey = 'aiAgentUser';
 
   private loggedIn$ = new BehaviorSubject<boolean>(this.hasToken());
@@ -55,6 +56,18 @@ export class AuthService {
     return localStorage.getItem(this.tokenKey);
   }
 
+  get refreshToken(): string | null {
+    return localStorage.getItem(this.refreshTokenKey);
+  }
+
+  /** Exchanges the stored refresh token for a fresh access/refresh pair. */
+  refresh(): Observable<AuthResponse> {
+    const rt = this.refreshToken;
+    return this.http.post<AuthResponse>(`${this.baseUrl}/refresh`, { refreshToken: rt }).pipe(
+      tap(res => this.handleAuth(res))
+    );
+  }
+
   get currentUser(): CurrentUser | null {
     return this.loadUser();
   }
@@ -81,17 +94,25 @@ export class AuthService {
   }
 
   private handleAuth(res: AuthResponse): void {
-    if (res.token && res.username && res.role) {
+    if (res.token) {
       localStorage.setItem(this.tokenKey, res.token);
+      if (res.refreshToken) {
+        localStorage.setItem(this.refreshTokenKey, res.refreshToken);
+      }
+    }
+    if (res.username && res.role) {
       const user: CurrentUser = { username: res.username, role: res.role };
       localStorage.setItem(this.userKey, JSON.stringify(user));
       this.user$.next(user);
+    }
+    if (res.token) {
       this.loggedIn$.next(true);
     }
   }
 
   private clearAuth(): void {
     localStorage.removeItem(this.tokenKey);
+    localStorage.removeItem(this.refreshTokenKey);
     localStorage.removeItem(this.userKey);
     localStorage.removeItem('aiAgentSessions');
     localStorage.removeItem('aiAgentActiveSession');

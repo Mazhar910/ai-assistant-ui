@@ -20,7 +20,9 @@ export class MarkdownComponent implements OnChanges {
   constructor(private sanitizer: DomSanitizer) { }
 
   ngOnChanges(): void {
-    const result = marked.parse(this.content ?? '', { gfm: true, breaks: true, async: false }) as string;
+    // marked v18 parses synchronously by default; the deprecated `async: false`
+    // option is omitted. The cast is safe: plain-string input yields a string.
+    const result = marked.parse(this.content ?? '', { gfm: true, breaks: true }) as string;
     const clean = DOMPurify.sanitize(result, { ADD_ATTR: ['target'] });
     this.html = this.sanitizer.sanitize(SecurityContext.HTML, clean) ?? '';
     this.decorateCodeBlocks();
